@@ -1,4 +1,3 @@
-// pages/students/quiz.js
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -30,20 +29,27 @@ import axios from "axios";
 
 const { Title, Text } = Typography;
 
+// Konfigurasi posisi notifikasi
+message.config({
+  top: 70,
+  duration: 3,
+  maxCount: 3,
+});
+
 export default function StudentsPage() {
   const [students, setStudents] = useState([]);
-  const [rawStudents, setRawStudents] = useState([]); // unfiltered master
+  const [rawStudents, setRawStudents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [currentStudent, setCurrentStudent] = useState(null);
   const [form] = Form.useForm();
 
-  // search & filter
+  // State untuk search & filter
   const [searchTerm, setSearchTerm] = useState("");
   const [classFilter, setClassFilter] = useState(null);
 
-  // pagination
+  // Pagination state
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 8,
@@ -51,21 +57,24 @@ export default function StudentsPage() {
 
   const API_URL = "/api/students";
 
-  // Fetch students
+  // --- FETCH DATA ---
   const fetchStudents = async (showLoading = true) => {
     try {
       if (showLoading) setLoading(true);
 
       const res = await axios.get(API_URL);
+      // Handle berbagai kemungkinan struktur response
       const data = res.data?.data ?? res.data ?? [];
       const arr = Array.isArray(data) ? data : data?.body?.data ?? [];
-      const filteredArr = arr.filter((s) => s.status!== "deleted");
+      
+      // Filter data yang statusnya 'deleted' (jika ada soft delete)
+      const filteredArr = arr.filter((s) => s.status !== "deleted");
 
       setRawStudents(filteredArr);
       setStudents(filteredArr);
     } catch (error) {
       console.error(error);
-      message.error("Failed to fetch students");
+      message.error("Gagal mengambil data siswa.");
     } finally {
       if (showLoading) setLoading(false);
     }
@@ -75,15 +84,16 @@ export default function StudentsPage() {
     fetchStudents();
   }, []);
 
-  // Search & Filter
+  // --- FILTER & SEARCH EFFECT ---
   useEffect(() => {
     const term = String(searchTerm).trim().toLowerCase();
     let filtered = rawStudents;
 
     if (term) {
-      filtered = filtered.filter((s) =>
-        String(s.name).toLowerCase().includes(term) ||
-        String(s.major).toLowerCase().includes(term)
+      filtered = filtered.filter(
+        (s) =>
+          String(s.name).toLowerCase().includes(term) ||
+          String(s.major).toLowerCase().includes(term)
       );
     }
 
@@ -95,61 +105,84 @@ export default function StudentsPage() {
     setStudents(filtered);
   }, [searchTerm, classFilter, rawStudents]);
 
-  // Add or Update student
+  // --- HANDLE SUBMIT (ADD / EDIT) ---
   const handleSubmit = async (values) => {
+    // Tampilkan loading message
+    const loadingMsg = message.loading("Sedang menyimpan data...", 0);
+
     try {
       setLoading(true);
 
       if (isEditing && currentStudent) {
+        // --- LOGIKA EDIT ---
         await axios.put(`${API_URL}?id=${currentStudent.id}`, values);
-        message.success("Student updated successfully!");
 
-        // Optimistic update
+        // Tutup loading, tampilkan sukses
+        loadingMsg(); 
+        message.success(`Data siswa "${values.name}" berhasil diperbarui!`);
+
+        // Optimistic Update (Update tampilan tanpa refresh total)
         setRawStudents((prev) =>
           prev.map((s) =>
             s.id === currentStudent.id ? { ...s, ...values } : s
           )
         );
       } else {
+        // --- LOGIKA ADD ---
         await axios.post(API_URL, values);
-        message.success("Student added successfully!");
+        
+        loadingMsg();
+        message.success(`Siswa "${values.name}" berhasil ditambahkan!`);
       }
 
+      // Reset Form & Tutup Modal
       setIsModalOpen(false);
       form.resetFields();
       setIsEditing(false);
       setCurrentStudent(null);
 
+      // Refresh data dari server untuk memastikan sinkronisasi
       await fetchStudents(false);
+
     } catch (error) {
       console.error(error);
-      message.error("Failed to save student");
+      loadingMsg(); // Hapus loading
+      message.error(
+        isEditing ? "Gagal memperbarui data siswa." : "Gagal menambahkan siswa."
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  // Delete student (FIXED)
+  // --- HANDLE DELETE ---
   const handleDelete = async (id) => {
+    // Tampilkan loading message
+    const loadingMsg = message.loading("Sedang menghapus data...", 0);
+
     try {
       setLoading(true);
+      const studentName = rawStudents.find((s) => s.id === id)?.name || "Siswa";
 
       await axios.delete(`${API_URL}?id=${id}`);
 
-      message.success("Student deleted successfully!");
+      loadingMsg(); // Hapus loading
+      message.success(`Data "${studentName}" berhasil dihapus!`);
 
-      // Optimistic update
+      // Hapus dari state lokal (supaya tabel langsung update)
       setRawStudents((prev) => prev.filter((s) => s.id !== id));
       setStudents((prev) => prev.filter((s) => s.id !== id));
+
     } catch (error) {
       console.error(error);
-      message.error("Failed to delete student");
+      loadingMsg();
+      message.error("Gagal menghapus data siswa.");
     } finally {
       setLoading(false);
     }
   };
 
-  // Open edit modal
+  // --- OPEN MODAL (EDIT MODE) ---
   const openEditModal = (student) => {
     setIsEditing(true);
     setCurrentStudent(student);
@@ -164,7 +197,7 @@ export default function StudentsPage() {
     setIsModalOpen(true);
   };
 
-  // Table columns
+  // --- TABLE COLUMNS ---
   const columns = useMemo(
     () => [
       {
@@ -209,13 +242,19 @@ export default function StudentsPage() {
         width: 160,
         render: (_, record) => (
           <Space>
-            <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(record)}>
+            <Button
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => openEditModal(record)}
+            >
               Edit
             </Button>
             <Popconfirm
-              title="Delete student?"
-              okText="Yes"
-              cancelText="No"
+              title="Hapus data siswa?"
+              description={`Yakin ingin menghapus ${record.name}?`}
+              okText="Ya, Hapus"
+              cancelText="Batal"
+              okButtonProps={{ danger: true }}
               onConfirm={() => handleDelete(record.id)}
             >
               <Button size="small" danger icon={<DeleteOutlined />} />
@@ -224,16 +263,13 @@ export default function StudentsPage() {
         ),
       },
     ],
-    [pagination]
+    [pagination, rawStudents] // Dependency updated
   );
 
   const classOptions = [
-    "X RPL 1",
-    "X RPL 2",
-    "XI RPL 1",
-    "XI RPL 2",
-    "XII RPL 1",
-    "XII RPL 2",
+    "X RPL 1", "X RPL 2", 
+    "XI RPL 1", "XI RPL 2", 
+    "XII RPL 1", "XII RPL 2",
   ];
 
   return (
@@ -250,7 +286,11 @@ export default function StudentsPage() {
         title={<Title level={3}>Student Management</Title>}
         extra={
           <Space>
-            <Button icon={<ReloadOutlined />} onClick={() => fetchStudents()} loading={loading}>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => fetchStudents()}
+              loading={loading}
+            >
               Refresh
             </Button>
             <Button
@@ -312,7 +352,7 @@ export default function StudentsPage() {
         </Row>
 
         {/* Table */}
-        <Spin spinning={loading}>
+        <Spin spinning={loading} tip="Memuat data...">
           <Table
             columns={columns}
             dataSource={students}
@@ -322,13 +362,14 @@ export default function StudentsPage() {
               pageSize: pagination.pageSize,
               total: students.length,
               showSizeChanger: false,
-              onChange: (page, pageSize) => setPagination({ current: page, pageSize }),
+              onChange: (page, pageSize) =>
+                setPagination({ current: page, pageSize }),
             }}
           />
         </Spin>
       </Card>
 
-      {/* Modal */}
+      {/* Modal Form */}
       <Modal
         title={isEditing ? "Edit Student" : "Add Student"}
         open={isModalOpen}
@@ -341,23 +382,26 @@ export default function StudentsPage() {
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
           <Form.Item name="name" label="Full Name" rules={[{ required: true }]}>
-            <Input />
+            <Input placeholder="Masukkan nama siswa" />
           </Form.Item>
 
           <Form.Item name="nis" label="NIS" rules={[{ required: true }]}>
-            <Input />
+            <Input placeholder="Nomor Induk Siswa" />
           </Form.Item>
 
           <Form.Item name="class_name" label="Class" rules={[{ required: true }]}>
-            <Select options={classOptions.map((c) => ({ label: c, value: c }))} />
+            <Select 
+                placeholder="Pilih Kelas"
+                options={classOptions.map((c) => ({ label: c, value: c }))} 
+            />
           </Form.Item>
 
           <Form.Item name="major" label="Major" rules={[{ required: true }]}>
-            <Input />
+            <Input placeholder="Jurusan" />
           </Form.Item>
 
           <Button type="primary" htmlType="submit" block loading={loading}>
-            {isEditing ? "Update" : "Add"}
+            {isEditing ? "Update Data" : "Simpan Data"}
           </Button>
         </Form>
       </Modal>
